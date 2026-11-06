@@ -1,0 +1,47 @@
+# Pose targets use meters and wxyz quaternions in the arm_origin site frame.
+osc_port: 7000
+tick_hz: 100
+timeout_s: 0.2
+# Packets whose position offset exceeds this norm are rejected (input check).
+max_move_m: 0.30
+home_move_s: 4.0
+home_timeout_s: 15.0
+home_position_tol_m: 0.02
+home_angle_tol_deg: 8.0
+# Limits apply to outgoing joint commands, including gravity compensation.
+home_joint_speed_rad_s: 0.5
+follow_joint_speed_rad_s:
+  sim: 2.0
+  hardware: 0.75
+# Follow hand position speed, limited before IK (joint limits still apply).
+follow_hand_speed_m_s:
+  sim: 2.0
+  hardware: 0.2
+# The gripping force limit is set in the driver profile.
+gripper_speed_rad_s: 2.0
+# Follow recording folder, used only when started with run-*.sh/.cmd --record.
+record_dir: recorded_data/bridge
+# Only effective for the sim backend with DORA_OPENARM_MUJOCO_CTRL=true.
+sim_gravity_compensation: true
+# Hardware only. Read at startup; restart Dora after changing these values.
+hardware_gravity_compensation:
+  enabled: true
+  scale: 1.0             # 0 = no correction, 1 = full model estimate (allowed: 0..1).
+  max_offset_rad: 0.15   # Maximum correction per arm joint; gripper is excluded.
+# Detailed Home JSON is opt-in; transitions and stop reasons are always reported.
+home_diagnostics: true
+# Receive-only status to the TouchDesigner PC. Never carries motor commands.
+# For hardware, set host to the IPv4 address of the PC running TouchDesigner.
+status:
+  enabled: true
+  host: 127.0.0.1
+  port: 7001
+# Read once at startup. Home keeps the current measured gripper opening.
+home_preset: forward
+home_presets:
+  forward:
+    right: [0, 0, 0, 1.570796, 0, 0, 0, 0]
+    left: [0, 0, 0, 1.570796, 0, 0, 0, 0]
+  down:
+    right: [0, 0, 0, 0, 0, 0, 0, 0]
+    left: [0, 0, 0, 0, 0, 0, 0, 0]

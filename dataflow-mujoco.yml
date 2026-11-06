@@ -1,0 +1,43 @@
+nodes:
+  - id: td-bridge
+    path: openarm-td-bridge
+    args: "--backend sim --listen 127.0.0.1 --config config/control.yml"
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
+    inputs:
+      tick: dora/timer/millis/10
+      right_state: mujoco/position_right
+      left_state: mujoco/position_left
+      solution_right: ik/position_right
+      solution_left: ik/position_left
+    outputs:
+      - target_right
+      - target_left
+      - position
+      - position_right
+      - position_left
+
+  - id: ik
+    path: dora-openarm-ik
+    args: "--xml .venv/share/openarm_mujoco/v2/pedestal/pedestal.xml --mode bimanual --tick-hz 100 --dt 0.01 --limit-velocity"
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
+    inputs:
+      target_right: td-bridge/target_right
+      target_left: td-bridge/target_left
+      position: td-bridge/position
+    outputs: [position_right, position_left, status]
+
+  - id: mujoco
+    path: dora-openarm-mujoco
+    args: "--scene pedestal --keyframe home"
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
+    inputs:
+      move_position_right: td-bridge/position_right
+      move_position_left: td-bridge/position_left
+      request_position: dora/timer/millis/10
+    outputs: [position_right, position_left, status]

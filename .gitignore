@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+
+# Environments
+.venv/
+.env
+
+# Outputs of the tools and tests
+/out/
+/recorded_data/
+/MUJOCO_LOG.TXT
+
+# TouchDesigner backups and expanded projects
+td/Backup/
+*.toe.dir
+*.toe.toc

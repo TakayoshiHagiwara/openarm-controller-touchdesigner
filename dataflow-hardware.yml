@@ -1,0 +1,80 @@
+# Hardware dataflow for OpenArm v2 Pedestal; see docs/hardware.md.
+# Start with: bash run-hardware.sh [--record]
+nodes:
+  - id: td-bridge
+    path: openarm-td-bridge
+    args: "--backend hardware --listen 0.0.0.0 --config config/control.yml --hardware-config config/openarm_pedestal.yaml"
+    inputs:
+      tick:
+        source: dora/timer/millis/10
+        queue_size: 1
+      right_state:
+        source: follower-right/state
+        queue_size: 1
+      left_state:
+        source: follower-left/state
+        queue_size: 1
+      right_status: follower-right/status
+      left_status: follower-left/status
+      solution_right:
+        source: ik/position_right
+        queue_size: 1
+      solution_left:
+        source: ik/position_left
+        queue_size: 1
+    outputs:
+      - target_right
+      - target_left
+      - position
+      - position_right
+      - position_left
+      - arm_command_right
+      - arm_command_left
+      - request_state_right
+      - request_state_left
+
+  - id: ik
+    path: dora-openarm-ik
+    args: "--xml .venv/share/openarm_mujoco/v2/pedestal/pedestal.xml --mode bimanual --tick-hz 100 --dt 0.01 --limit-velocity"
+    inputs:
+      target_right:
+        source: td-bridge/target_right
+        queue_size: 1
+      target_left:
+        source: td-bridge/target_left
+        queue_size: 1
+      position: td-bridge/position
+    outputs: [position_right, position_left, status]
+
+  - id: follower-right
+    path: openarm-td-hardware
+    args: "--side right --config config/openarm_pedestal.yaml --timeout 0.2"
+    inputs:
+      motion_tick:
+        source: dora/timer/millis/20
+        queue_size: 1
+      # Bridge polls only after started and stops polling before driver stop.
+      request_state:
+        source: td-bridge/request_state_right
+        queue_size: 1
+      move_position:
+        source: td-bridge/position_right
+        queue_size: 1
+      command: td-bridge/arm_command_right
+    outputs: [state, status]
+
+  - id: follower-left
+    path: openarm-td-hardware
+    args: "--side left --config config/openarm_pedestal.yaml --timeout 0.2"
+    inputs:
+      motion_tick:
+        source: dora/timer/millis/20
+        queue_size: 1
+      request_state:
+        source: td-bridge/request_state_left
+        queue_size: 1
+      move_position:
+        source: td-bridge/position_left
+        queue_size: 1
+      command: td-bridge/arm_command_left
+    outputs: [state, status]

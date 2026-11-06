@@ -1,0 +1,4 @@
+# Keep shell scripts runnable on Linux even when checked out on Windows.
+*.sh text eol=lf
+*.cmd text eol=crlf
+*.toe binary

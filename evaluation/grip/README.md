@@ -1,6 +1,6 @@
 # Jev Grip Benchmark (Local Milestone 1)
 
-[検証レポート](report/README.md) · [計測データ](report/results.json)
+[検証レポート](report/grip-benchmark-report.md) · [計測データ](report/results.json)
 
 Offline, seed-driven MuJoCo grip dataset generator and genuine force/contact grasp oracle built on the pinned `openarm-mujoco` OpenArm v2 Pedestal model (`openarm-mujoco==2.3.0`).
 
@@ -76,8 +76,9 @@ same prompt and require an object such as `{"choice":"wait"}`. The summary
 records the schema. OpenAI Decisions submits the same question and choices
 using its native choice request.
 
-Derive a fixed oblique main-camera image and an empty-close overlay from each
-existing snapshot. The raw wrist image is verified against the original PNG,
+Derive an OpenArm right head-camera image and an empty-close overlay from each
+existing snapshot. The head camera retains the calibration from the pinned Cell
+model relative to the arm mount and renders at 1280 × 720. The raw wrist image is verified against the original PNG,
 and both renderings keep the same sample ID and physics label. The overlay
 projects only the two closed finger meshes at the original wrist camera pose.
 
@@ -87,8 +88,8 @@ uv run --locked python -m evaluation.grip.benchmark --dataset out/grip-cases-vie
 uv run --locked python -m evaluation.grip.benchmark --dataset out/grip-cases-views --view-mode wrist-overlay --backend openai-decisions --out out/grip-wrist-overlay
 ```
 
-Use `--view-mode main-wrist` to send the main image first and the raw wrist
-image second. Set the local vLLM image limit to at least two for this mode.
+Use `--view-mode main-wrist` to send the right head image first and the raw
+wrist image second. Set the local vLLM image limit to at least two for this mode.
 Use `--view-mode wrist-overlay` to send one composite image.
 
 Generate a smoke dataset at a fresh path under ignored `out/`. The dataset appears at its final path after generation succeeds.

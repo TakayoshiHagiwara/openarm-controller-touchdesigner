@@ -431,7 +431,7 @@ def _write_dataset(
         "observation_schema_version": OBSERVATION_SCHEMA_VERSION,
         "generated_at_utc": datetime.now(UTC).isoformat(),
         "seed": int(seed),
-        "num_groups": int(num_groups),
+        "num_groups": len({record.group_id for record in obs_records}),
         "summary": {
             "total_samples": len(eval_records),
             "physics_success_count": sum(

@@ -1,4 +1,4 @@
-"""Derive synchronized main-camera and empty-close overlay observations."""
+"""Derive synchronized head-camera and empty-close overlay observations."""
 
 from __future__ import annotations
 
@@ -6,6 +6,8 @@ import argparse
 import json
 import shutil
 import tempfile
+from dataclasses import asdict
+from importlib.metadata import version
 from pathlib import Path
 from typing import Any
 
@@ -15,32 +17,21 @@ import numpy as np
 from evaluation.grip.benchmark import load_manifest, resolve_rgb_path
 from evaluation.grip.camera import write_png_rgb
 from evaluation.grip.oracle import OracleProfile
-from evaluation.grip.scene import SceneConfig, SceneContract, build_eval_scene
+from evaluation.grip.scene import (
+    ARM_ORIGIN_SITE,
+    CAMERA_HEAD_RIGHT,
+    SceneConfig,
+    SceneContract,
+    build_eval_scene,
+)
 from evaluation.grip.snapshot import (
     StateSnapshot,
     load_state_snapshot,
     restore_integration_state,
 )
 
-MAIN_CAMERA = {
-    "lookat": (0.33, -0.15, 0.47),
-    "distance": 0.60,
-    "azimuth": 100.0,
-    "elevation": -27.0,
-}
 OVERLAY_RGB = (38, 223, 255)
 OVERLAY_OPACITY = 0.40
-
-
-def _fixed_main_camera() -> mujoco.MjvCamera:
-    """Use the same external oblique camera for every snapshot."""
-    camera = mujoco.MjvCamera()
-    camera.type = mujoco.mjtCamera.mjCAMERA_FREE
-    camera.lookat[:] = MAIN_CAMERA["lookat"]
-    camera.distance = MAIN_CAMERA["distance"]
-    camera.azimuth = MAIN_CAMERA["azimuth"]
-    camera.elevation = MAIN_CAMERA["elevation"]
-    return camera
 
 
 def _finger_visuals(model: mujoco.MjModel, contract: SceneContract) -> list[int]:
@@ -137,10 +128,15 @@ def derive_views(dataset_dir: str | Path, out_dir: str | Path) -> Path:
     first_state = _read_snapshot(source, observations[0])
     dimensions = observations[0]["camera"]
     width, height = dimensions["width"], dimensions["height"]
-    model, contract = build_eval_scene(SceneConfig(**first_state.scene_config))
-    model.vis.global_.offwidth = max(model.vis.global_.offwidth, width)
-    model.vis.global_.offheight = max(model.vis.global_.offheight, height)
-    main_camera = _fixed_main_camera()
+    model, contract = build_eval_scene(
+        SceneConfig(**first_state.scene_config), include_head_camera=True
+    )
+    head_camera = contract.head_camera
+    if head_camera is None:
+        raise ValueError("The evaluation scene has no head camera calibration")
+    head_width, head_height = head_camera.resolution_px
+    model.vis.global_.offwidth = max(model.vis.global_.offwidth, width, head_width)
+    model.vis.global_.offheight = max(model.vis.global_.offheight, height, head_height)
     visual_fingers = _finger_visuals(model, contract)
     output.parent.mkdir(parents=True, exist_ok=True)
 
@@ -149,7 +145,12 @@ def derive_views(dataset_dir: str | Path, out_dir: str | Path) -> Path:
         obs_dir = stage / "observation"
         (obs_dir / "main").mkdir(parents=True)
         (obs_dir / "overlay").mkdir()
-        with mujoco.Renderer(model, height=height, width=width) as renderer:
+        with (
+            mujoco.Renderer(model, height=height, width=width) as renderer,
+            mujoco.Renderer(
+                model, height=head_height, width=head_width
+            ) as head_renderer,
+        ):
             for observation in observations:
                 sample_id = observation["sample_id"]
                 snapshot = _read_snapshot(source, observation)
@@ -172,8 +173,8 @@ def derive_views(dataset_dir: str | Path, out_dir: str | Path) -> Path:
                     raise ValueError(f"Rerendered wrist pixels differ for {sample_id}")
 
                 main_relative = f"main/{sample_id}.png"
-                renderer.update_scene(data, camera=main_camera)
-                write_png_rgb(obs_dir / main_relative, renderer.render())
+                head_renderer.update_scene(data, camera=CAMERA_HEAD_RIGHT)
+                write_png_rgb(obs_dir / main_relative, head_renderer.render())
 
                 mask = _empty_close_mask(
                     model, contract, renderer, data, visual_fingers
@@ -196,7 +197,12 @@ def derive_views(dataset_dir: str | Path, out_dir: str | Path) -> Path:
         metadata = {
             "source_dataset": str(source),
             "count": len(observations),
-            "main_camera": MAIN_CAMERA,
+            "main_camera": {
+                "name": CAMERA_HEAD_RIGHT,
+                "source": f"openarm-mujoco {version('openarm-mujoco')} v2/cell/cell.xml",
+                "reference_frame": ARM_ORIGIN_SITE,
+                **asdict(head_camera),
+            },
             "image_size": [width, height],
             "overlay": {
                 "rgb": OVERLAY_RGB,
@@ -213,7 +219,7 @@ def derive_views(dataset_dir: str | Path, out_dir: str | Path) -> Path:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Render a main view and a wrist overlay from Grip snapshots."
+        description="Render the OpenArm head view and a wrist overlay from Grip snapshots."
     )
     parser.add_argument("--dataset", required=True, type=Path)
     parser.add_argument("--out", required=True, type=Path)

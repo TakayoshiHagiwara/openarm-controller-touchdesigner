@@ -18,6 +18,8 @@ import openarm_mujoco.v2 as openarm_mujoco
 from openarm_control import ArmSetup, IKParams, Kinematics
 
 CAMERA_WRIST_RIGHT = "camera_wrist_right"
+CAMERA_HEAD_RIGHT = "camera_head_right"
+ARM_ORIGIN_SITE = "arm_origin"
 RIGHT_EE_SITE = "right_ee_control_point"
 LEFT_EE_SITE = "left_ee_control_point"
 LEFT_FINGER_COLLISION_GEOMS = (
@@ -77,6 +79,17 @@ class SceneConfig:
 
 
 @dataclass(frozen=True)
+class HeadCameraCalibration:
+    """OpenArm Cell head camera parameters relative to the arm origin."""
+
+    source_xml_sha256: str
+    position_relative_m: tuple[float, ...]
+    quaternion_relative_wxyz: tuple[float, ...]
+    fovy_deg: float
+    resolution_px: tuple[int, int]
+
+
+@dataclass(frozen=True)
 class SceneContract:
     """Resolved MuJoCo IDs and names for the evaluation scene."""
 
@@ -105,6 +118,7 @@ class SceneContract:
     box_qpos_adr: int
     box_dof_adr: int
     floor_geom_id: int
+    head_camera: HeadCameraCalibration | None = None
 
 
 def _require_id(model: mujoco.MjModel, obj_type: mujoco.mjtObj, name: str) -> int:
@@ -114,8 +128,54 @@ def _require_id(model: mujoco.MjModel, obj_type: mujoco.mjtObj, name: str) -> in
     return int(obj_id)
 
 
+def _attach_head_camera(spec: mujoco.MjSpec) -> HeadCameraCalibration:
+    """Transfer the right head camera from Cell to the pedestal arm mount."""
+    cell_xml = Path(openarm_mujoco.openarm_cell_xml())
+    cell_model = mujoco.MjModel.from_xml_path(str(cell_xml))
+    cell_data = mujoco.MjData(cell_model)
+    mujoco.mj_forward(cell_model, cell_data)
+    camera_id = _require_id(cell_model, mujoco.mjtObj.mjOBJ_CAMERA, CAMERA_HEAD_RIGHT)
+    origin_id = _require_id(cell_model, mujoco.mjtObj.mjOBJ_SITE, ARM_ORIGIN_SITE)
+    origin_axes = cell_data.site_xmat[origin_id].reshape(3, 3)
+    position = origin_axes.T @ (
+        cell_data.cam_xpos[camera_id] - cell_data.site_xpos[origin_id]
+    )
+    rotation = origin_axes.T @ cell_data.cam_xmat[camera_id].reshape(3, 3)
+    quaternion = np.empty(4)
+    mujoco.mju_mat2Quat(quaternion, rotation.ravel())
+    fovy = float(cell_model.cam_fovy[camera_id])
+    width, height = map(int, cell_model.cam_resolution[camera_id])
+
+    origin = spec.site(ARM_ORIGIN_SITE)
+    if origin is None:
+        raise ValueError(f"Required MuJoCo site not found: {ARM_ORIGIN_SITE!r}")
+    local_position = np.empty(3)
+    local_quaternion = np.empty(4)
+    mujoco.mju_mulPose(
+        local_position, local_quaternion, origin.pos, origin.quat, position, quaternion
+    )
+    camera = origin.parent.add_camera(
+        name=CAMERA_HEAD_RIGHT,
+        pos=local_position,
+        quat=local_quaternion,
+        fovy=fovy,
+        resolution=[width, height],
+    )
+    if origin.frame is not None:
+        camera.set_frame(origin.frame)
+    return HeadCameraCalibration(
+        source_xml_sha256=hashlib.sha256(cell_xml.read_bytes()).hexdigest(),
+        position_relative_m=tuple(position.tolist()),
+        quaternion_relative_wxyz=tuple(quaternion.tolist()),
+        fovy_deg=fovy,
+        resolution_px=(width, height),
+    )
+
+
 def build_eval_scene(
     config: SceneConfig | None = None,
+    *,
+    include_head_camera: bool = False,
 ) -> tuple[mujoco.MjModel, SceneContract]:
     """Build the evaluation-only MuJoCo model from the pinned OpenArm v2 pedestal XML."""
     cfg = config or SceneConfig()
@@ -164,6 +224,7 @@ def build_eval_scene(
         solref=[0.005, 1.0],
     )
 
+    head_camera = _attach_head_camera(spec) if include_head_camera else None
     model = spec.compile()
 
     camera_id = _require_id(model, mujoco.mjtObj.mjOBJ_CAMERA, CAMERA_WRIST_RIGHT)
@@ -258,6 +319,7 @@ def build_eval_scene(
         box_qpos_adr=int(model.jnt_qposadr[box_joint_id]),
         box_dof_adr=int(model.jnt_dofadr[box_joint_id]),
         floor_geom_id=floor_geom_id,
+        head_camera=head_camera,
     )
     verify_scene_contract(model, contract)
     return model, contract

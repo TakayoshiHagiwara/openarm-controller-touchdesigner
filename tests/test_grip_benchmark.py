@@ -20,6 +20,7 @@ from pathlib import Path
 
 import mujoco
 import numpy as np
+from openarm_mujoco.v2 import openarm_cell_xml
 import pytest
 
 from evaluation.grip.camera import CameraConfig, WristCameraCapture
@@ -31,6 +32,8 @@ from evaluation.grip.dataset import (
 )
 from evaluation.grip.oracle import OracleProfile, evaluate_snapshot
 from evaluation.grip.scene import (
+    ARM_ORIGIN_SITE,
+    CAMERA_HEAD_RIGHT,
     RightArmController,
     SceneConfig,
     build_eval_scene,
@@ -498,3 +501,29 @@ def test_cli_generates_reproducible_separated_dataset_with_visibility_and_no_lea
     assert not (out_a / "observation" / "dataset_meta.json").exists()
 
     assert cli_main(["--out", str(out_a), "--verify-only"]) == 0
+
+
+def test_head_camera_matches_cell_calibration_at_the_arm_mount():
+    pedestal, contract = build_eval_scene(include_head_camera=True)
+    cell = mujoco.MjModel.from_xml_path(openarm_cell_xml())
+    cell_data, pedestal_data = mujoco.MjData(cell), mujoco.MjData(pedestal)
+    mujoco.mj_forward(cell, cell_data)
+    mujoco.mj_forward(pedestal, pedestal_data)
+    cell_camera = cell.camera(CAMERA_HEAD_RIGHT).id
+    pedestal_camera = pedestal.camera(CAMERA_HEAD_RIGHT).id
+
+    np.testing.assert_allclose(
+        pedestal_data.cam_xpos[pedestal_camera]
+        - pedestal_data.site_xpos[pedestal.site(ARM_ORIGIN_SITE).id],
+        cell_data.cam_xpos[cell_camera]
+        - cell_data.site_xpos[cell.site(ARM_ORIGIN_SITE).id],
+        atol=1e-9,
+    )
+    np.testing.assert_allclose(
+        pedestal_data.cam_xmat[pedestal_camera],
+        cell_data.cam_xmat[cell_camera],
+        atol=1e-9,
+    )
+    assert contract.head_camera is not None
+    assert contract.head_camera.resolution_px == (1280, 720)
+    assert pedestal.cam_fovy[pedestal_camera] == cell.cam_fovy[cell_camera] == 52.0

@@ -1,5 +1,7 @@
 # Jev Grip Benchmark (Local Milestone 1)
 
+[検証レポート](report/README.md) · [計測データ](report/results.json)
+
 Offline, seed-driven MuJoCo grip dataset generator and genuine force/contact grasp oracle built on the pinned `openarm-mujoco` OpenArm v2 Pedestal model (`openarm-mujoco==2.3.0`).
 
 ## Verified Model & Scene Contract

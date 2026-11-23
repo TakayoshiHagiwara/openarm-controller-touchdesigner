@@ -17,6 +17,20 @@ import pytest
 
 from evaluation.grip import benchmark as bm
 
+
+EXPECTED_CHOICE_FORMAT = {
+    "name": "grip_choice",
+    "strict": True,
+    "schema": {
+        "type": "object",
+        "properties": {
+            "choice": {"type": "string", "enum": ["close", "wait", "uncertain"]}
+        },
+        "required": ["choice"],
+        "additionalProperties": False,
+    },
+}
+
 # Minimal valid 1x1 orange PNG bytes (no external image libraries required).
 TINY_PNG_BYTES = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
@@ -166,7 +180,10 @@ def test_terra_disables_reasoning_for_vision_chat(
     assert backend.endpoint == "https://api.openai.com/v1/chat/completions"
     assert payload["model"] == "gpt-6.1-terra"
     assert payload["reasoning_effort"] == "none"
-    assert payload["max_completion_tokens"] == 16
+    assert payload["response_format"] == {
+        "type": "json_schema",
+        "json_schema": EXPECTED_CHOICE_FORMAT,
+    }
     assert payload["messages"][0]["content"][1]["type"] == "image_url"
 
 
@@ -309,11 +326,11 @@ def test_local_vlm_payload_strict_parse_and_optional_auth(
     monkeypatch.setenv("LOCAL_VLM_TOKEN", "local-secret-token")
 
     reply_contents = [
-        "close",
-        "  WAIT \n",
+        '{"choice": "close"}',
+        '  {"choice": "wait"} \n',
         '{"choice": "uncertain"}',
-        '```json\n{"choice": "close"}\n```',
-        "I think you should close now because it looks aligned.",
+        "close",
+        '{"choice": "close", "explanation": "aligned"}',
         '{"choice": "grab"}',
     ]
 
@@ -352,6 +369,10 @@ def test_local_vlm_payload_strict_parse_and_optional_auth(
     assert first["path"] == "/v1/chat/completions"
     assert first["headers"]["authorization"] == "Bearer local-secret-token"
     assert first["json"]["model"] == "qwen2.5-vl-7b"
+    assert first["json"]["response_format"] == {
+        "type": "json_schema",
+        "json_schema": EXPECTED_CHOICE_FORMAT,
+    }
     msg_content = first["json"]["messages"][0]["content"]
     img_parts = [p for p in msg_content if p.get("type") == "image_url"]
     assert len(img_parts) == 1
@@ -369,12 +390,82 @@ def test_local_vlm_payload_strict_parse_and_optional_auth(
         ("ok", "close"),
         ("ok", "wait"),
         ("ok", "uncertain"),
-        ("ok", "close"),
+        ("invalid_response", None),
         ("invalid_response", None),
         ("invalid_response", None),
     ]
-    assert summary["counts"]["failures"]["invalid_response"] == 2
-    assert summary["counts"]["ok_count"] == 4
+    assert summary["response_format"] == "json_schema"
+    assert summary["counts"]["failures"]["invalid_response"] == 3
+    assert summary["counts"]["ok_count"] == 3
+
+
+def test_openai_responses_uses_the_same_schema_and_validates_status(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dataset_dir = _write_dataset(
+        tmp_path / "ds",
+        [
+            {"sample_id": f"smp_{i}", "group_id": "grp_0000", "label": 0}
+            for i in range(3)
+        ],
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "dummy-test-key")
+
+    def responder(
+        index: int, _req: dict[str, Any]
+    ) -> tuple[int, dict[str, Any], float]:
+        content = (
+            {"type": "refusal", "refusal": "unavailable"}
+            if index == 1
+            else {"type": "output_text", "text": '{"choice":"wait"}'}
+        )
+        return (
+            200,
+            {
+                "status": "incomplete" if index == 2 else "completed",
+                "model": "gpt-6-luna",
+                "output": [
+                    {"type": "reasoning"},
+                    {"type": "message", "content": [content]},
+                ],
+            },
+            0.0,
+        )
+
+    out_dir = tmp_path / "out"
+    with _LoopbackServer(responder) as srv:
+        summary = bm.run_benchmark(
+            dataset_dir=dataset_dir,
+            out_dir=out_dir,
+            backend_name="openai-responses",
+            base_url=srv.base_url,
+        )
+
+    assert len(srv.requests) == 3
+    assert srv.requests[0]["path"] == "/v1/responses"
+    payload = srv.requests[0]["json"]
+    assert payload["model"] == "gpt-6-luna"
+    assert payload["reasoning"] == {"effort": "none"}
+    assert payload["text"]["format"] == {
+        "type": "json_schema",
+        **EXPECTED_CHOICE_FORMAT,
+    }
+    content = payload["input"][0]["content"]
+    assert content[0] == {"type": "input_text", "text": bm.LOCAL_VLM_PROMPT}
+    assert content[1]["type"] == "input_image"
+    assert content[1]["image_url"].startswith("data:image/png;base64,")
+    assert "smp_0" not in srv.requests[0]["raw_body"]
+    assert summary["response_format"] == "json_schema"
+    assert summary["reasoning_effort"] == "none"
+    pred_rows = [
+        json.loads(line)
+        for line in (out_dir / "predictions.jsonl").read_text().splitlines()
+    ]
+    assert [(row["status"], row["prediction"]) for row in pred_rows] == [
+        ("ok", "wait"),
+        ("refusal", None),
+        ("invalid_response", None),
+    ]
 
 
 def test_http_error_timeout_and_invalid_decisions_response_no_retry(
@@ -749,7 +840,10 @@ def test_elapsed_through_validation_zero_denominators_and_missing_key(
             # Advance clock inside HTTP read; final clock read happens after choice validation.
             fake_clock()
             return json.dumps(
-                {"model": "stub-vlm", "choices": [{"message": {"content": "wait"}}]}
+                {
+                    "model": "stub-vlm",
+                    "choices": [{"message": {"content": '{"choice": "wait"}'}}],
+                }
             ).encode("utf-8")
 
     def fake_urlopen(req: Any, timeout: float = 10.0) -> _FakeResp:

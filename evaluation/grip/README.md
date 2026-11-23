@@ -63,11 +63,16 @@ the actual physics outcome independently, including any invalid outcome.
 ```bash
 uv run --locked python -m evaluation.grip --cases --width 960 --height 600 --out out/grip-cases --verify-rerun
 uv run --locked python -m evaluation.grip.benchmark --dataset out/grip-cases --backend openai-terra --out out/grip-cases-terra
+uv run --locked python -m evaluation.grip.benchmark --dataset out/grip-cases --backend openai-responses --out out/grip-cases-luna-responses
 uv run --locked python -m evaluation.grip.benchmark --dataset out/grip-cases --backend local-vlm --base-url http://127.0.0.1:8000/v1 --model Qwen/Qwen2.5-VL-3B-Instruct --out out/grip-cases-vllm
 ```
 
-Use `OPENAI_API_KEY` for Terra (vision Chat Completions, reasoning effort
-`none`). The local command expects a reachable vLLM OpenAI-compatible server.
+Use `OPENAI_API_KEY` for Terra (Chat Completions) and Luna (Responses). Both
+use reasoning effort `none`. The local command expects a vLLM vision server
+with JSON Schema structured outputs enabled. These three backends use the
+same prompt and require an object such as `{"choice":"wait"}`. The summary
+records the schema. OpenAI Decisions submits the same question and choices
+using its native choice request.
 
 Generate a smoke dataset at a fresh path under ignored `out/`. The dataset appears at its final path after generation succeeds.
 

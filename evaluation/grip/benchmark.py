@@ -14,7 +14,6 @@ import http.client
 import json
 import math
 import os
-import re
 import socket
 import time
 import urllib.error
@@ -25,14 +24,19 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, Protocol, cast
 
-Choice = Literal["close", "wait", "uncertain"]
+from evaluation.grip.structured_choice import (
+    CHOICE_OUTPUT_FORMAT,
+    CHOICES,
+    Choice,
+    parse_choice_json,
+)
+
 Status = Literal["ok", "timeout", "http_error", "invalid_response", "refusal"]
 SplitFilter = Literal["dev", "eval", "all"]
 
 SCHEMA_VERSION = "1.0"
 PROMPT_VERSION = "grip-pilot-v1"
 QUESTION_NAME = "grip"
-CHOICES: tuple[Choice, ...] = ("close", "wait", "uncertain")
 VALID_CHOICES: frozenset[str] = frozenset(CHOICES)
 DEADLINE_MS_THRESHOLDS: tuple[int, ...] = (100, 200, 500)
 
@@ -42,6 +46,7 @@ DEFAULT_TERRA_MODEL = "gpt-6.1-terra"
 DEFAULT_OPENAI_API_KEY_ENV = "OPENAI_API_KEY"
 DEFAULT_LOCAL_VLM_BASE_URL = "http://127.0.0.1:8000/v1"
 DEFAULT_TIMEOUT_S = 20.0
+CHOICE_MAX_OUTPUT_TOKENS = 32
 
 SHARED_QUESTION = (
     "Look at the robot's wrist-camera image. Can the open gripper pick up the orange "
@@ -56,10 +61,8 @@ LOCAL_VLM_PROMPT = (
     SHARED_QUESTION
     + "\n"
     + "\n".join(f"{key}: {text}" for key, text in CHOICE_DESCRIPTIONS.items())
-    + "\nReply with exactly one choice word."
+    + '\nReturn a JSON object with only the key "choice" and one of the values above.'
 )
-
-_CODE_FENCE_RE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL | re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -123,49 +126,6 @@ def detect_image_mime_type(rgb_bytes: bytes, path: Path) -> str:
     if suffix == ".webp":
         return "image/webp"
     return "image/png"
-
-
-def parse_local_vlm_choice(raw_text: Any) -> Choice | None:
-    """Strictly parse a chat completion content string as an enum or simple JSON choice."""
-    if isinstance(raw_text, list):
-        parts: list[str] = []
-        for item in raw_text:
-            if (
-                isinstance(item, dict)
-                and item.get("type") == "text"
-                and isinstance(item.get("text"), str)
-            ):
-                parts.append(item["text"])
-            elif isinstance(item, str):
-                parts.append(item)
-        text = "".join(parts)
-    elif isinstance(raw_text, str):
-        text = raw_text
-    else:
-        return None
-
-    stripped = text.strip()
-    if not stripped:
-        return None
-
-    fenced = _CODE_FENCE_RE.match(stripped)
-    if fenced:
-        stripped = fenced.group(1).strip()
-
-    lowered = stripped.lower()
-    if lowered in VALID_CHOICES:
-        return cast(Choice, lowered)
-
-    if stripped.startswith("{") and stripped.endswith("}"):
-        try:
-            obj = json.loads(stripped)
-        except json.JSONDecodeError:
-            return None
-        if isinstance(obj, dict) and isinstance(obj.get("choice"), str):
-            val = obj["choice"].strip().lower()
-            if val in VALID_CHOICES:
-                return cast(Choice, val)
-    return None
 
 
 def parse_openai_decisions_payload(
@@ -434,6 +394,7 @@ class LocalVLMBackend:
     """OpenAI-compatible `/v1/chat/completions` backend for local VLM servers."""
 
     name = "local-vlm"
+    endpoint_path = "chat/completions"
 
     def __init__(
         self,
@@ -456,7 +417,7 @@ class LocalVLMBackend:
                     f"Environment variable {api_key_env!r} was specified via --api-key-env but is unset or empty."
                 )
         self.base_url = base_url.strip().rstrip("/")
-        self.endpoint = _endpoint_url(self.base_url, "chat/completions")
+        self.endpoint = _endpoint_url(self.base_url, self.endpoint_path)
         self.model = model.strip()
         self.timeout_s = float(timeout_s)
         self._api_key = api_key
@@ -468,8 +429,12 @@ class LocalVLMBackend:
         return {
             "model": self.model,
             "temperature": 0,
-            "max_tokens": 16,
+            "max_tokens": CHOICE_MAX_OUTPUT_TOKENS,
             "stream": False,
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": CHOICE_OUTPUT_FORMAT,
+            },
             "messages": [
                 {
                     "role": "user",
@@ -530,25 +495,22 @@ class LocalVLMBackend:
             else None
         )
 
-        content: Any = None
-        if isinstance(body, dict):
-            choices = body.get("choices")
-            if isinstance(choices, list) and choices and isinstance(choices[0], dict):
-                msg = choices[0].get("message")
-                if isinstance(msg, dict):
-                    content = msg.get("content")
-
-        choice = parse_local_vlm_choice(content)
+        content, refusal = (
+            self.response_content(body) if isinstance(body, dict) else (None, False)
+        )
+        choice = None if refusal else parse_choice_json(content)
         elapsed_ms = _elapsed_ms(self._clock, t0)
         if choice is None:
             return BackendResult(
-                status="invalid_response",
+                status="refusal" if refusal else "invalid_response",
                 prediction=None,
                 elapsed_ms=elapsed_ms,
                 response_model=response_model,
                 usage=usage,
                 http_status=http_status,
-                error="could not parse valid choice ('close'|'wait'|'uncertain') from chat completion",
+                error="refusal"
+                if refusal
+                else "response did not contain a valid grip choice JSON object",
             )
 
         return BackendResult(
@@ -559,6 +521,20 @@ class LocalVLMBackend:
             usage=usage,
             http_status=http_status,
         )
+
+    @staticmethod
+    def response_content(body: dict[str, Any]) -> tuple[object, bool]:
+        choices = body.get("choices")
+        if (
+            not isinstance(choices, list)
+            or not choices
+            or not isinstance(choices[0], dict)
+        ):
+            return None, False
+        message = choices[0].get("message")
+        if not isinstance(message, dict):
+            return None, False
+        return message.get("content"), bool(message.get("refusal"))
 
 
 class OpenAITerraBackend(LocalVLMBackend):
@@ -573,6 +549,60 @@ class OpenAITerraBackend(LocalVLMBackend):
         payload["max_completion_tokens"] = payload.pop("max_tokens")
         payload["reasoning_effort"] = "none"
         return payload
+
+
+class OpenAIResponsesBackend(LocalVLMBackend):
+    """OpenAI Responses vision backend with the shared grip choice schema."""
+
+    name = "openai-responses"
+    endpoint_path = "responses"
+
+    def build_payload(
+        self, rgb_bytes: bytes, *, mime_type: str = "image/png"
+    ) -> dict[str, Any]:
+        return {
+            "model": self.model,
+            "temperature": 0,
+            "reasoning": {"effort": "none"},
+            "max_output_tokens": CHOICE_MAX_OUTPUT_TOKENS,
+            "store": False,
+            "text": {"format": {"type": "json_schema", **CHOICE_OUTPUT_FORMAT}},
+            "input": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": LOCAL_VLM_PROMPT},
+                        {
+                            "type": "input_image",
+                            "image_url": _encode_data_url(rgb_bytes, mime_type),
+                        },
+                    ],
+                }
+            ],
+        }
+
+    @staticmethod
+    def response_content(body: dict[str, Any]) -> tuple[object, bool]:
+        output = body.get("output")
+        if body.get("status") != "completed" or not isinstance(output, list):
+            return None, False
+
+        parts: list[str] = []
+        for item in output:
+            if not isinstance(item, dict) or item.get("type") != "message":
+                continue
+            content = item.get("content")
+            if not isinstance(content, list):
+                continue
+            for part in content:
+                if not isinstance(part, dict):
+                    continue
+                if part.get("type") == "refusal":
+                    return None, True
+                text = part.get("text")
+                if part.get("type") == "output_text" and isinstance(text, str):
+                    parts.append(text)
+        return "".join(parts), False
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -846,6 +876,13 @@ def create_backend(
             api_key_env=api_key_env or DEFAULT_OPENAI_API_KEY_ENV,
             timeout_s=timeout_s,
         )
+    if backend_name == "openai-responses":
+        return OpenAIResponsesBackend(
+            base_url=base_url or DEFAULT_OPENAI_BASE_URL,
+            model=model or DEFAULT_OPENAI_MODEL,
+            api_key_env=api_key_env or DEFAULT_OPENAI_API_KEY_ENV,
+            timeout_s=timeout_s,
+        )
     raise ValueError(f"Unsupported backend: {backend_name!r}")
 
 
@@ -951,7 +988,15 @@ def run_benchmark(
         limit=limit,
         timeout_s=getattr(active_backend, "timeout_s", None),
     )
-    if isinstance(active_backend, OpenAITerraBackend):
+    if isinstance(active_backend, LocalVLMBackend):
+        summary.update(
+            response_format="json_schema",
+            choice_schema=CHOICE_OUTPUT_FORMAT["schema"],
+            prompt=LOCAL_VLM_PROMPT,
+            temperature=0,
+            max_output_tokens=CHOICE_MAX_OUTPUT_TOKENS,
+        )
+    if isinstance(active_backend, (OpenAITerraBackend, OpenAIResponsesBackend)):
         summary["reasoning_effort"] = "none"
 
     out_path.mkdir(parents=True)
@@ -988,7 +1033,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--backend",
         required=True,
-        choices=("openai-decisions", "openai-terra", "local-vlm", "always-wait"),
+        choices=(
+            "openai-decisions",
+            "openai-responses",
+            "openai-terra",
+            "local-vlm",
+            "always-wait",
+        ),
         help="Inference backend to evaluate.",
     )
     parser.add_argument(
@@ -1015,7 +1066,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--model",
         default=None,
         help=(
-            f"Model identifier (defaults: {DEFAULT_OPENAI_MODEL} for openai-decisions, "
+            f"Model identifier (defaults: {DEFAULT_OPENAI_MODEL} for openai-decisions and openai-responses, "
             f"{DEFAULT_TERRA_MODEL} for openai-terra; required for local-vlm)."
         ),
     )

@@ -388,9 +388,9 @@ def test_cli_generates_reproducible_separated_dataset_with_visibility_and_no_lea
             "--groups",
             "1",
             "--width",
-            "240",
+            "960",
             "--height",
-            "150",
+            "600",
             "--out",
             str(out_a),
         ]
@@ -402,9 +402,9 @@ def test_cli_generates_reproducible_separated_dataset_with_visibility_and_no_lea
             "--groups",
             "1",
             "--width",
-            "240",
+            "960",
             "--height",
-            "150",
+            "600",
             "--out",
             str(out_b),
         ]
@@ -444,6 +444,7 @@ def test_cli_generates_reproducible_separated_dataset_with_visibility_and_no_lea
         assert not leak_pattern.search(record["sample_id"])
         assert not leak_pattern.search(record["rgb_path"])
         assert not leak_pattern.search(record["group_id"])
+        assert (record["camera"]["width"], record["camera"]["height"]) == (960, 600)
         img_file = out_a / "observation" / record["rgb_path"]
         assert img_file.is_file()
         assert img_file.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")

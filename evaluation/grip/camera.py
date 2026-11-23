@@ -117,10 +117,14 @@ class WristCameraCapture:
                 f"Camera mismatch: config={self.config.camera_name!r}, "
                 f"contract={contract.camera_name!r}"
             )
+        width, height = self.config.width, self.config.height
+        if width < 1 or height < 1:
+            raise ValueError("Render width and height must be positive")
+        visual = model.vis.global_
+        visual.offwidth = max(visual.offwidth, width)
+        visual.offheight = max(visual.offheight, height)
         try:
-            self._renderer = mujoco.Renderer(
-                model, height=int(self.config.height), width=int(self.config.width)
-            )
+            self._renderer = mujoco.Renderer(model, height=height, width=width)
         except Exception as exc:
             raise RuntimeError(
                 f"Failed to initialize MuJoCo offscreen renderer for "

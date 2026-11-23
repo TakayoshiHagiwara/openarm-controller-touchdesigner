@@ -9,7 +9,6 @@ evaluator metadata, paths, IDs, and labels.
 from __future__ import annotations
 
 import argparse
-import base64
 import http.client
 import json
 import math
@@ -18,12 +17,13 @@ import socket
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, Protocol, cast
 
+from evaluation.grip.input_images import ImageInput, image_content_parts
 from evaluation.grip.structured_choice import (
     CHOICE_OUTPUT_FORMAT,
     CHOICES,
@@ -33,6 +33,13 @@ from evaluation.grip.structured_choice import (
 
 Status = Literal["ok", "timeout", "http_error", "invalid_response", "refusal"]
 SplitFilter = Literal["dev", "eval", "all"]
+ViewMode = Literal["wrist", "main-wrist", "wrist-overlay"]
+
+VIEW_PATHS: dict[ViewMode, tuple[str, ...]] = {
+    "wrist": ("rgb_path",),
+    "main-wrist": ("main_rgb_path", "rgb_path"),
+    "wrist-overlay": ("wrist_overlay_rgb_path",),
+}
 
 SCHEMA_VERSION = "1.0"
 PROMPT_VERSION = "grip-pilot-v1"
@@ -48,26 +55,39 @@ DEFAULT_LOCAL_VLM_BASE_URL = "http://127.0.0.1:8000/v1"
 DEFAULT_TIMEOUT_S = 20.0
 CHOICE_MAX_OUTPUT_TOKENS = 32
 
-SHARED_QUESTION = (
-    "Look at the robot's wrist-camera image. Can the open gripper pick up the orange "
-    "box by closing its jaws at the current position and orientation, then lifting?"
+GRASP_QUESTION = (
+    "Can the open gripper pick up the orange box by closing its jaws at the "
+    "current position and orientation, then lifting?"
 )
+SHARED_QUESTION = f"Look at the robot's wrist-camera image. {GRASP_QUESTION}"
+VIEW_QUESTIONS: dict[ViewMode, str] = {
+    "wrist": SHARED_QUESTION,
+    "main-wrist": (
+        "The first image is from the fixed main camera. The second image is from the "
+        "wrist camera at the same instant. Use both views. " + GRASP_QUESTION
+    ),
+    "wrist-overlay": (
+        "The wrist-camera image shows the current open gripper. The translucent "
+        "cyan overlay shows the fingers fully closed in empty space at that same "
+        "wrist pose. Use the overlay as a guide. " + GRASP_QUESTION
+    ),
+}
 CHOICE_DESCRIPTIONS: dict[Choice, str] = {
     "close": "The box is positioned within reach between the jaws. Close now.",
     "wait": "The box is outside the region the jaws can grip. Do not close yet.",
     "uncertain": "The image does not give enough evidence about the box and jaws.",
 }
-LOCAL_VLM_PROMPT = (
-    SHARED_QUESTION
-    + "\n"
+CHOICE_PROMPT_SUFFIX = (
+    "\n"
     + "\n".join(f"{key}: {text}" for key, text in CHOICE_DESCRIPTIONS.items())
     + '\nReturn a JSON object with only the key "choice" and one of the values above.'
 )
+LOCAL_VLM_PROMPT = SHARED_QUESTION + CHOICE_PROMPT_SUFFIX
 
 
 @dataclass(frozen=True)
 class BackendResult:
-    """Validated single-image result from a benchmark backend."""
+    """Validated result for one observation from a benchmark backend."""
 
     status: Status
     prediction: Choice | None
@@ -105,11 +125,6 @@ def _endpoint_url(base_url: str, v1_path: str) -> str:
     if clean_base.endswith("/v1"):
         return f"{clean_base}/{clean_path}"
     return f"{clean_base}/v1/{clean_path}"
-
-
-def _encode_data_url(rgb_bytes: bytes, mime_type: str) -> str:
-    b64 = base64.b64encode(rgb_bytes).decode("ascii")
-    return f"data:{mime_type};base64,{b64}"
 
 
 def detect_image_mime_type(rgb_bytes: bytes, path: Path) -> str:
@@ -294,24 +309,26 @@ class OpenAIDecisionsBackend:
     def build_payload(
         self, rgb_bytes: bytes, *, mime_type: str = "image/png"
     ) -> dict[str, Any]:
+        return self.build_image_payload(
+            (ImageInput(rgb_bytes, mime_type),), question=SHARED_QUESTION
+        )
+
+    def build_image_payload(
+        self, images: Sequence[ImageInput], *, question: str
+    ) -> dict[str, Any]:
         return {
             "model": self.model,
             "input": [
                 {
                     "role": "user",
-                    "content": [
-                        {
-                            "type": "input_image",
-                            "image_url": _encode_data_url(rgb_bytes, mime_type),
-                        },
-                    ],
+                    "content": image_content_parts(images, kind="input_image"),
                 }
             ],
             "questions": [
                 {
                     "type": "choice",
                     "name": QUESTION_NAME,
-                    "instructions": SHARED_QUESTION,
+                    "instructions": question,
                     "choices": [
                         {"value": value, "description": desc}
                         for value, desc in CHOICE_DESCRIPTIONS.items()
@@ -323,8 +340,15 @@ class OpenAIDecisionsBackend:
     def predict(
         self, rgb_bytes: bytes, *, mime_type: str = "image/png"
     ) -> BackendResult:
+        return self.predict_images(
+            (ImageInput(rgb_bytes, mime_type),), question=SHARED_QUESTION
+        )
+
+    def predict_images(
+        self, images: Sequence[ImageInput], *, question: str
+    ) -> BackendResult:
         t0 = self._clock()
-        payload = self.build_payload(rgb_bytes, mime_type=mime_type)
+        payload = self.build_image_payload(images, question=question)
         http_status, raw, err_status, err_detail = _post_json(
             self.endpoint,
             payload,
@@ -426,6 +450,13 @@ class LocalVLMBackend:
     def build_payload(
         self, rgb_bytes: bytes, *, mime_type: str = "image/png"
     ) -> dict[str, Any]:
+        return self.build_image_payload(
+            (ImageInput(rgb_bytes, mime_type),), question=SHARED_QUESTION
+        )
+
+    def build_image_payload(
+        self, images: Sequence[ImageInput], *, question: str
+    ) -> dict[str, Any]:
         return {
             "model": self.model,
             "temperature": 0,
@@ -439,13 +470,8 @@ class LocalVLMBackend:
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": LOCAL_VLM_PROMPT},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": _encode_data_url(rgb_bytes, mime_type)
-                            },
-                        },
+                        {"type": "text", "text": question + CHOICE_PROMPT_SUFFIX},
+                        *image_content_parts(images, kind="image_url"),
                     ],
                 }
             ],
@@ -454,8 +480,15 @@ class LocalVLMBackend:
     def predict(
         self, rgb_bytes: bytes, *, mime_type: str = "image/png"
     ) -> BackendResult:
+        return self.predict_images(
+            (ImageInput(rgb_bytes, mime_type),), question=SHARED_QUESTION
+        )
+
+    def predict_images(
+        self, images: Sequence[ImageInput], *, question: str
+    ) -> BackendResult:
         t0 = self._clock()
-        payload = self.build_payload(rgb_bytes, mime_type=mime_type)
+        payload = self.build_image_payload(images, question=question)
         headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
         http_status, raw, err_status, err_detail = _post_json(
             self.endpoint,
@@ -542,10 +575,10 @@ class OpenAITerraBackend(LocalVLMBackend):
 
     name = "openai-terra"
 
-    def build_payload(
-        self, rgb_bytes: bytes, *, mime_type: str = "image/png"
+    def build_image_payload(
+        self, images: Sequence[ImageInput], *, question: str
     ) -> dict[str, Any]:
-        payload = super().build_payload(rgb_bytes, mime_type=mime_type)
+        payload = super().build_image_payload(images, question=question)
         payload["max_completion_tokens"] = payload.pop("max_tokens")
         payload["reasoning_effort"] = "none"
         return payload
@@ -557,8 +590,8 @@ class OpenAIResponsesBackend(LocalVLMBackend):
     name = "openai-responses"
     endpoint_path = "responses"
 
-    def build_payload(
-        self, rgb_bytes: bytes, *, mime_type: str = "image/png"
+    def build_image_payload(
+        self, images: Sequence[ImageInput], *, question: str
     ) -> dict[str, Any]:
         return {
             "model": self.model,
@@ -571,11 +604,8 @@ class OpenAIResponsesBackend(LocalVLMBackend):
                 {
                     "role": "user",
                     "content": [
-                        {"type": "input_text", "text": LOCAL_VLM_PROMPT},
-                        {
-                            "type": "input_image",
-                            "image_url": _encode_data_url(rgb_bytes, mime_type),
-                        },
+                        {"type": "input_text", "text": question + CHOICE_PROMPT_SUFFIX},
+                        *image_content_parts(images, kind="input_image"),
                     ],
                 }
             ],
@@ -892,6 +922,7 @@ def run_benchmark(
     out_dir: str | Path,
     backend_name: str | None = None,
     backend: DecisionBackend | None = None,
+    view_mode: ViewMode = "wrist",
     split: SplitFilter = "all",
     limit: int | None = None,
     base_url: str | None = None,
@@ -923,6 +954,16 @@ def run_benchmark(
     else:
         active_backend = backend
 
+    if view_mode not in VIEW_PATHS:
+        raise ValueError(f"Unsupported view mode: {view_mode!r}")
+    path_fields = VIEW_PATHS[view_mode]
+    question = VIEW_QUESTIONS[view_mode]
+    predict_images = getattr(active_backend, "predict_images", None)
+    if view_mode != "wrist" and not callable(predict_images):
+        raise ValueError(
+            f"{active_backend.name!r} cannot evaluate {view_mode!r} observations"
+        )
+
     # Phase 1: Observation manifest + optional split filtering, then --limit.
     observations = load_manifest(ds_path)
     split_map = load_splits(ds_path)
@@ -937,13 +978,28 @@ def run_benchmark(
     if limit is not None:
         observations = observations[:limit]
 
-    # Phase 2: Inference loop. Backend sees ONLY raw RGB bytes and MIME type.
+    # Phase 2: Backend sees only the image content and the common view prompt.
     raw_results: list[tuple[dict[str, Any], BackendResult]] = []
     for obs in observations:
-        img_path = resolve_rgb_path(ds_path, obs["rgb_path"])
-        rgb_bytes = img_path.read_bytes()
-        mime_type = detect_image_mime_type(rgb_bytes, img_path)
-        result = active_backend.predict(rgb_bytes, mime_type=mime_type)
+        images: list[ImageInput] = []
+        for field in path_fields:
+            rgb_path = obs.get(field)
+            if not isinstance(rgb_path, str) or not rgb_path:
+                raise ValueError(
+                    f"Observation {obs['sample_id']!r} is missing {field!r}"
+                )
+            image_path = resolve_rgb_path(ds_path, rgb_path)
+            rgb_bytes = image_path.read_bytes()
+            images.append(
+                ImageInput(rgb_bytes, detect_image_mime_type(rgb_bytes, image_path))
+            )
+        if view_mode == "wrist":
+            result = active_backend.predict(
+                images[0].rgb_bytes, mime_type=images[0].mime_type
+            )
+        else:
+            assert callable(predict_images)
+            result = predict_images(images, question=question)
         raw_results.append((obs, result))
 
     # Phase 3: Load evaluator labels AFTER inference and join strictly by sample_id.
@@ -988,11 +1044,14 @@ def run_benchmark(
         limit=limit,
         timeout_s=getattr(active_backend, "timeout_s", None),
     )
+    summary.update(
+        view_mode=view_mode, input_image_count=len(path_fields), question=question
+    )
     if isinstance(active_backend, LocalVLMBackend):
         summary.update(
             response_format="json_schema",
             choice_schema=CHOICE_OUTPUT_FORMAT["schema"],
-            prompt=LOCAL_VLM_PROMPT,
+            prompt=question + CHOICE_PROMPT_SUFFIX,
             temperature=0,
             max_output_tokens=CHOICE_MAX_OUTPUT_TOKENS,
         )
@@ -1041,6 +1100,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
             "always-wait",
         ),
         help="Inference backend to evaluate.",
+    )
+    parser.add_argument(
+        "--view-mode",
+        default="wrist",
+        choices=tuple(VIEW_PATHS),
+        help="Select the original wrist, main plus wrist, or wrist with empty-close overlay.",
     )
     parser.add_argument(
         "--split",
@@ -1094,6 +1159,7 @@ def main(argv: list[str] | None = None) -> int:
         dataset_dir=args.dataset,
         out_dir=args.out,
         backend_name=args.backend,
+        view_mode=args.view_mode,
         split=args.split,
         limit=args.limit,
         base_url=args.base_url,

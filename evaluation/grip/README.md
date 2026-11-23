@@ -74,6 +74,21 @@ same prompt and require an object such as `{"choice":"wait"}`. The summary
 records the schema. OpenAI Decisions submits the same question and choices
 using its native choice request.
 
+Derive a fixed oblique main-camera image and an empty-close overlay from each
+existing snapshot. The raw wrist image is verified against the original PNG,
+and both renderings keep the same sample ID and physics label. The overlay
+projects only the two closed finger meshes at the original wrist camera pose.
+
+```bash
+uv run --locked python -m evaluation.grip.views --dataset out/grip-cases --out out/grip-cases-views
+uv run --locked python -m evaluation.grip.benchmark --dataset out/grip-cases-views --view-mode main-wrist --backend openai-decisions --out out/grip-main-wrist
+uv run --locked python -m evaluation.grip.benchmark --dataset out/grip-cases-views --view-mode wrist-overlay --backend openai-decisions --out out/grip-wrist-overlay
+```
+
+Use `--view-mode main-wrist` to send the main image first and the raw wrist
+image second. Set the local vLLM image limit to at least two for this mode.
+Use `--view-mode wrist-overlay` to send one composite image.
+
 Generate a smoke dataset at a fresh path under ignored `out/`. The dataset appears at its final path after generation succeeds.
 
 ```bash

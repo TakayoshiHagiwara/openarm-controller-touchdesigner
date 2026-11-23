@@ -468,6 +468,97 @@ def test_openai_responses_uses_the_same_schema_and_validates_status(
     ]
 
 
+@pytest.mark.parametrize(
+    "backend_name",
+    ("local-vlm", "openai-terra", "openai-responses", "openai-decisions"),
+)
+@pytest.mark.parametrize("view_mode", ("main-wrist", "wrist-overlay"))
+def test_view_modes_send_ordered_images_and_shared_question(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    backend_name: str,
+    view_mode: bm.ViewMode,
+) -> None:
+    dataset = _write_dataset(
+        tmp_path / "dataset",
+        [{"sample_id": "secret-sample", "group_id": "secret-group", "label": 1}],
+    )
+    obs = dataset / "observation"
+    manifest = obs / "manifest.jsonl"
+    row = json.loads(manifest.read_text().strip())
+    row.update(main_rgb_path="main.png", wrist_overlay_rgb_path="overlay.png")
+    manifest.write_text(json.dumps(row) + "\n")
+    main = TINY_PNG_BYTES + b"main"
+    overlay = TINY_PNG_BYTES + b"overlay"
+    (obs / "main.png").write_bytes(main)
+    (obs / "overlay.png").write_bytes(overlay)
+    monkeypatch.setenv("OPENAI_API_KEY", "dummy-test-key")
+
+    bodies = {
+        "openai-decisions": {"answers": [{"name": "grip", "choice": "close"}]},
+        "openai-responses": {
+            "status": "completed",
+            "output": [
+                {
+                    "type": "message",
+                    "content": [{"type": "output_text", "text": '{"choice":"close"}'}],
+                }
+            ],
+        },
+    }
+    payloads = []
+
+    def post_json(_url, payload, **_kwargs):
+        payloads.append(payload)
+        body = bodies.get(
+            backend_name, {"choices": [{"message": {"content": '{"choice":"close"}'}}]}
+        )
+        return 200, json.dumps(body).encode(), None, None
+
+    monkeypatch.setattr(bm, "_post_json", post_json)
+    summary = bm.run_benchmark(
+        dataset_dir=dataset,
+        out_dir=tmp_path / "results",
+        view_mode=view_mode,
+        backend_name=backend_name,
+        model="test-model",
+    )
+
+    assert summary["view_mode"] == view_mode
+    assert summary["counts"]["predictions"]["close"] == 1
+    (payload,) = payloads
+    if backend_name == "openai-decisions":
+        content = payload["input"][0]["content"]
+        text = payload["questions"][0]["instructions"]
+    elif backend_name == "openai-responses":
+        content = payload["input"][0]["content"]
+        text = content[0]["text"]
+    else:
+        content = payload["messages"][0]["content"]
+        text = content[0]["text"]
+
+    imgs = [
+        base64.b64decode(
+            (
+                part["image_url"]
+                if part["type"] == "input_image"
+                else part["image_url"]["url"]
+            ).split(",", 1)[1]
+        )
+        for part in content
+        if part["type"] in ("input_image", "image_url")
+    ]
+    if view_mode == "main-wrist":
+        assert imgs == [main, TINY_PNG_BYTES]
+        assert "first image" in text.lower()
+        assert "second image" in text.lower()
+    else:
+        assert imgs == [overlay]
+        assert "fully closed" in text.lower()
+    assert "secret-sample" not in json.dumps(payload)
+    assert "secret-group" not in json.dumps(payload)
+
+
 def test_http_error_timeout_and_invalid_decisions_response_no_retry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

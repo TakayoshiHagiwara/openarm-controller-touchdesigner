@@ -33,6 +33,7 @@ openarm-status-monitor = "status_monitor:main"
 
 [tool.setuptools]
 py-modules = ["bridge", "hardware_node", "status_monitor"]
+packages = ["evaluation", "evaluation.grip"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -183,6 +183,31 @@ def _sample_negative_candidates(
     return candidates
 
 
+def _pilot_offsets(
+    rng: np.random.Generator, group_index: int
+) -> tuple[
+    list[tuple[str, tuple[float, float, float]]],
+    list[tuple[str, tuple[float, float, float]]],
+]:
+    """Propose close-width pairs and leave the physical label to the oracle."""
+    x_jitter, y_jitter, z_jitter = rng.uniform(-0.002, 0.002, 3).tolist()
+    if group_index % 4 == 0:
+        return (
+            [("pilot_high_positive", (x_jitter, y_jitter, 0.029 + z_jitter))],
+            [
+                ("pilot_high_near_miss", (x_jitter, y_jitter, 0.043 + z_jitter)),
+                ("pilot_high_near_miss", (0.0, 0.0, 0.048)),
+            ],
+        )
+    return (
+        [("pilot_short_positive", (-0.022 + x_jitter, y_jitter, 0.005 + z_jitter))],
+        [
+            ("pilot_short_near_miss", (-0.034 + x_jitter, y_jitter, -0.006 + z_jitter)),
+            ("pilot_short_near_miss", (-0.036, 0.0, -0.004)),
+        ],
+    )
+
+
 def generate_dataset(
     out_dir: str | Path,
     *,
@@ -191,6 +216,7 @@ def generate_dataset(
     scene_config: SceneConfig | None = None,
     camera_config: CameraConfig | None = None,
     oracle_profile: OracleProfile | None = None,
+    pilot: bool = False,
 ) -> dict[str, Any]:
     """Generate a reproducible offline grip dataset with confirmed positive and negative pairs."""
     if num_groups < 1:
@@ -211,6 +237,7 @@ def generate_dataset(
             scene_config or SceneConfig(),
             camera_config or CameraConfig(),
             oracle_profile or OracleProfile(),
+            pilot=pilot,
         )
         staged.rename(out_path)
     return meta
@@ -223,6 +250,8 @@ def _write_dataset(
     s_cfg: SceneConfig,
     c_cfg: CameraConfig,
     o_prof: OracleProfile,
+    *,
+    pilot: bool,
 ) -> dict[str, Any]:
     obs_dir = out_path / "observation"
     eval_dir = out_path / "evaluator"
@@ -253,10 +282,13 @@ def _write_dataset(
             )
             box_yaw = float(rng.uniform(-0.14, 0.14))
 
-            candidates = (
-                ("physics_success", _sample_positive_candidates(rng)),
-                ("physics_failure", _sample_negative_candidates(rng)),
-            )
+            positive = _sample_positive_candidates(rng)
+            negative = _sample_negative_candidates(rng)
+            if pilot:
+                near_positive, near_negative = _pilot_offsets(rng, group_idx)
+                positive = near_positive + positive
+                negative = near_negative + negative
+            candidates = (("physics_success", positive), ("physics_failure", negative))
             # Choose capture order before rendering so timestamps do not encode outcomes.
             for slot_idx, candidate_idx in enumerate(
                 rng.permutation(len(candidates)).tolist()
@@ -351,9 +383,21 @@ def _write_dataset(
         encoding="utf-8",
     )
 
+    if pilot:
+        # Each box placement and both of its observations stay in the same split.
+        dev_count = min(num_groups - 1, max(1, num_groups // 5))
+        dev_indices = set(rng.permutation(num_groups)[:dev_count].tolist())
+        splits = {
+            f"grp_{index:04d}": "dev" if index in dev_indices else "eval"
+            for index in range(num_groups)
+        }
+        (eval_dir / "splits.json").write_text(
+            json.dumps(splits, indent=2) + "\n", encoding="utf-8"
+        )
+
     dataset_meta = {
         "benchmark": "jev-grip-benchmark",
-        "milestone": "local-milestone-1",
+        "milestone": "pilot" if pilot else "local-milestone-1",
         "evaluator_schema_version": EVALUATOR_SCHEMA_VERSION,
         "observation_schema_version": OBSERVATION_SCHEMA_VERSION,
         "generated_at_utc": datetime.now(UTC).isoformat(),

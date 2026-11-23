@@ -69,8 +69,20 @@ uv run --locked python -m evaluation.grip --pilot --seed 113 --groups 50 --out o
 a placement stay in that split. The Pilot favors small fore/aft and vertical
 offset pairs and confirms each outcome with the existing physics oracle.
 
+Run the same evaluation split through the available backends. Load
+`OPENAI_API_KEY` into the invoking shell for OpenAI Decisions, or supply the
+base URL and model ID of a running local OpenAI-compatible vision server.
+
+```bash
+uv run --locked python -m evaluation.grip.benchmark --dataset out/grip-pilot-113 --split eval --backend openai-decisions --out out/grip-pilot-openai
+uv run --locked python -m evaluation.grip.benchmark --dataset out/grip-pilot-113 --split eval --backend local-vlm --base-url http://127.0.0.1:11434/v1 --model qwen2.5vl:3b --out out/grip-pilot-local
+```
+
+Use `--split dev --limit 2` for a quick connection check. The output directory
+must be new. It contains the per-image responses and aggregate metrics.
+
 Run the focused regression suite:
 
 ```bash
-uv run --locked pytest -v tests/test_grip_benchmark.py
+uv run --locked pytest -v tests/test_grip_benchmark.py tests/test_grip_benchmark_runner.py
 ```

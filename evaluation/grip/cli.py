@@ -45,10 +45,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=1,
         help="Number of matched positive/negative groups to generate (default: 1).",
     )
-    parser.add_argument(
+    scenario_mode = parser.add_mutually_exclusive_group()
+    scenario_mode.add_argument(
         "--pilot",
         action="store_true",
         help="Prefer close boundary pairs and write a placement-disjoint development/evaluation split.",
+    )
+    scenario_mode.add_argument(
+        "--cases",
+        action="store_true",
+        help="Render the fixed designed scenarios once each and retain every physical outcome.",
     )
     parser.add_argument(
         "--width",
@@ -138,6 +144,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             num_groups=args.groups,
             camera_config=CameraConfig(width=args.width, height=args.height),
             pilot=args.pilot,
+            designed=args.cases,
         )
     except FileExistsError as exc:
         parser.error(str(exc))

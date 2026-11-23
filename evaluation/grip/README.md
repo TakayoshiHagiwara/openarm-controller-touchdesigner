@@ -46,6 +46,29 @@ Pair order is seeded before rendering. The manifest records the UTC time at the 
 
 ## Usage
 
+Start with six designed scenarios at a single box location:
+
+| Case | Hand offset X, Y, Z (mm) | Design expectation |
+| --- | --- | --- |
+| Centered | 0, 0, 0 | Close |
+| Near reach | -25, 0, 0 | Close |
+| Raised but reachable | 0, 0, +29 | Close |
+| Too short | -39, 0, 0 | Wait |
+| Too high | 0, 0, +48 | Wait |
+| Lateral miss at near reach | -25, +16, 0 | Wait |
+
+Each case is rendered once. The evaluator stores the expected label and
+the actual physics outcome independently, including any invalid outcome.
+
+```bash
+uv run --locked python -m evaluation.grip --cases --width 960 --height 600 --out out/grip-cases --verify-rerun
+uv run --locked python -m evaluation.grip.benchmark --dataset out/grip-cases --backend openai-terra --out out/grip-cases-terra
+uv run --locked python -m evaluation.grip.benchmark --dataset out/grip-cases --backend local-vlm --base-url http://127.0.0.1:8000/v1 --model Qwen/Qwen2.5-VL-3B-Instruct --out out/grip-cases-vllm
+```
+
+Use `OPENAI_API_KEY` for Terra (vision Chat Completions, reasoning effort
+`none`). The local command expects a reachable vLLM OpenAI-compatible server.
+
 Generate a smoke dataset at a fresh path under ignored `out/`. The dataset appears at its final path after generation succeeds.
 
 ```bash
@@ -75,7 +98,7 @@ base URL and model ID of a running local OpenAI-compatible vision server.
 
 ```bash
 uv run --locked python -m evaluation.grip.benchmark --dataset out/grip-pilot-113 --split eval --backend openai-decisions --out out/grip-pilot-openai
-uv run --locked python -m evaluation.grip.benchmark --dataset out/grip-pilot-113 --split eval --backend local-vlm --base-url http://127.0.0.1:11434/v1 --model qwen2.5vl:3b --out out/grip-pilot-local
+uv run --locked python -m evaluation.grip.benchmark --dataset out/grip-pilot-113 --split eval --backend local-vlm --base-url http://127.0.0.1:8000/v1 --model Qwen/Qwen2.5-VL-3B-Instruct --out out/grip-pilot-local
 ```
 
 Use `--split dev --limit 2` for a quick connection check. The output directory

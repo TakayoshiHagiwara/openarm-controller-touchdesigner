@@ -156,6 +156,20 @@ class _LoopbackServer:
         self._thread.join(timeout=2.0)
 
 
+def test_terra_disables_reasoning_for_vision_chat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "dummy-test-key")
+    backend = bm.create_backend("openai-terra")
+    assert isinstance(backend, bm.OpenAITerraBackend)
+    payload = backend.build_payload(TINY_PNG_BYTES)
+    assert backend.endpoint == "https://api.openai.com/v1/chat/completions"
+    assert payload["model"] == "gpt-6.1-terra"
+    assert payload["reasoning_effort"] == "none"
+    assert payload["max_completion_tokens"] == 16
+    assert payload["messages"][0]["content"][1]["type"] == "image_url"
+
+
 def test_openai_decisions_payload_parse_and_clean_separation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

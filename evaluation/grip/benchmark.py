@@ -38,6 +38,7 @@ DEADLINE_MS_THRESHOLDS: tuple[int, ...] = (100, 200, 500)
 
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_OPENAI_MODEL = "gpt-6-luna"
+DEFAULT_TERRA_MODEL = "gpt-6.1-terra"
 DEFAULT_OPENAI_API_KEY_ENV = "OPENAI_API_KEY"
 DEFAULT_LOCAL_VLM_BASE_URL = "http://127.0.0.1:8000/v1"
 DEFAULT_TIMEOUT_S = 20.0
@@ -560,6 +561,20 @@ class LocalVLMBackend:
         )
 
 
+class OpenAITerraBackend(LocalVLMBackend):
+    """OpenAI's vision chat endpoint with reasoning explicitly disabled."""
+
+    name = "openai-terra"
+
+    def build_payload(
+        self, rgb_bytes: bytes, *, mime_type: str = "image/png"
+    ) -> dict[str, Any]:
+        payload = super().build_payload(rgb_bytes, mime_type=mime_type)
+        payload["max_completion_tokens"] = payload.pop("max_tokens")
+        payload["reasoning_effort"] = "none"
+        return payload
+
+
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for lineno, line in enumerate(
@@ -824,6 +839,13 @@ def create_backend(
             api_key_env=api_key_env,
             timeout_s=timeout_s,
         )
+    if backend_name == "openai-terra":
+        return OpenAITerraBackend(
+            base_url=base_url or DEFAULT_OPENAI_BASE_URL,
+            model=model or DEFAULT_TERRA_MODEL,
+            api_key_env=api_key_env or DEFAULT_OPENAI_API_KEY_ENV,
+            timeout_s=timeout_s,
+        )
     raise ValueError(f"Unsupported backend: {backend_name!r}")
 
 
@@ -929,6 +951,8 @@ def run_benchmark(
         limit=limit,
         timeout_s=getattr(active_backend, "timeout_s", None),
     )
+    if isinstance(active_backend, OpenAITerraBackend):
+        summary["reasoning_effort"] = "none"
 
     out_path.mkdir(parents=True)
     predictions_file = out_path / "predictions.jsonl"
@@ -964,7 +988,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--backend",
         required=True,
-        choices=("openai-decisions", "local-vlm", "always-wait"),
+        choices=("openai-decisions", "openai-terra", "local-vlm", "always-wait"),
         help="Inference backend to evaluate.",
     )
     parser.add_argument(
@@ -983,7 +1007,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--base-url",
         default=None,
         help=(
-            f"API base URL (default: {DEFAULT_OPENAI_BASE_URL} for openai-decisions, "
+            f"API base URL (default: {DEFAULT_OPENAI_BASE_URL} for OpenAI backends, "
             f"{DEFAULT_LOCAL_VLM_BASE_URL} for local-vlm)."
         ),
     )
@@ -991,8 +1015,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--model",
         default=None,
         help=(
-            f"Model identifier (default: {DEFAULT_OPENAI_MODEL} for openai-decisions; "
-            "required for local-vlm)."
+            f"Model identifier (defaults: {DEFAULT_OPENAI_MODEL} for openai-decisions, "
+            f"{DEFAULT_TERRA_MODEL} for openai-terra; required for local-vlm)."
         ),
     )
     parser.add_argument(
@@ -1000,7 +1024,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             f"Environment variable holding the Bearer API key "
-            f"(default: {DEFAULT_OPENAI_API_KEY_ENV} for openai-decisions; optional for local-vlm)."
+            f"(default: {DEFAULT_OPENAI_API_KEY_ENV} for OpenAI backends; optional for local-vlm)."
         ),
     )
     parser.add_argument(

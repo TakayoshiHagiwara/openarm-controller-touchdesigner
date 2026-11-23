@@ -51,6 +51,17 @@ from evaluation.grip.snapshot import capture_integration_state, save_state_snaps
 OBSERVATION_SCHEMA_VERSION = "1.0"
 EVALUATOR_SCHEMA_VERSION = "1.0"
 
+# Fixed states at one box placement. Offsets are in world X, Y, Z, in meters.
+# The expected labels describe the design, while the oracle supplies the labels.
+DESIGNED_CASES = (
+    ("centered", (0.0, 0.0, 0.0), 1),
+    ("near_reach", (-0.025, 0.0, 0.0), 1),
+    ("raised_reachable", (0.0, 0.0, 0.029), 1),
+    ("too_short", (-0.039, 0.0, 0.0), 0),
+    ("too_high", (0.0, 0.0, 0.048), 0),
+    ("short_lateral", (-0.025, 0.016, 0.0), 0),
+)
+
 
 @dataclass(frozen=True)
 class ObservationRecord:
@@ -217,10 +228,15 @@ def generate_dataset(
     camera_config: CameraConfig | None = None,
     oracle_profile: OracleProfile | None = None,
     pilot: bool = False,
+    designed: bool = False,
 ) -> dict[str, Any]:
     """Generate a reproducible offline grip dataset with confirmed positive and negative pairs."""
     if num_groups < 1:
         raise ValueError(f"num_groups must be >= 1, got {num_groups}")
+    if designed:
+        if pilot:
+            raise ValueError("Choose either designed cases or pilot pairs")
+        num_groups = len(DESIGNED_CASES)
 
     out_path = Path(out_dir)
     if out_path.exists() or out_path.is_symlink():
@@ -238,6 +254,7 @@ def generate_dataset(
             camera_config or CameraConfig(),
             oracle_profile or OracleProfile(),
             pilot=pilot,
+            designed=designed,
         )
         staged.rename(out_path)
     return meta
@@ -252,6 +269,7 @@ def _write_dataset(
     o_prof: OracleProfile,
     *,
     pilot: bool,
+    designed: bool,
 ) -> dict[str, Any]:
     obs_dir = out_path / "observation"
     eval_dir = out_path / "evaluator"
@@ -271,24 +289,30 @@ def _write_dataset(
 
     with WristCameraCapture(model, contract, c_cfg) as camera:
         for group_idx in range(num_groups):
-            group_id = f"grp_{group_idx:04d}"
-            box_pos = np.array(
-                [
-                    float(rng.uniform(0.400, 0.422)),
-                    float(rng.uniform(-0.168, -0.132)),
-                    float(s_cfg.table_top_z + s_cfg.box_half_extents[2]),
-                ],
-                dtype=np.float64,
-            )
-            box_yaw = float(rng.uniform(-0.14, 0.14))
-
-            positive = _sample_positive_candidates(rng)
-            negative = _sample_negative_candidates(rng)
-            if pilot:
-                near_positive, near_negative = _pilot_offsets(rng, group_idx)
-                positive = near_positive + positive
-                negative = near_negative + negative
-            candidates = (("physics_success", positive), ("physics_failure", negative))
+            box_z = s_cfg.table_top_z + s_cfg.box_half_extents[2]
+            if designed:
+                name, offset, expected_label = DESIGNED_CASES[group_idx]
+                group_id = "grp_0000"
+                box_pos = np.array([0.411, -0.150, box_z])
+                box_yaw = 0.0
+                candidates = ((None, [(name, offset)]),)
+            else:
+                group_id = f"grp_{group_idx:04d}"
+                expected_label = None
+                box_pos = np.array(
+                    [rng.uniform(0.400, 0.422), rng.uniform(-0.168, -0.132), box_z]
+                )
+                box_yaw = float(rng.uniform(-0.14, 0.14))
+                positive = _sample_positive_candidates(rng)
+                negative = _sample_negative_candidates(rng)
+                if pilot:
+                    near_positive, near_negative = _pilot_offsets(rng, group_idx)
+                    positive = near_positive + positive
+                    negative = near_negative + negative
+                candidates = (
+                    ("physics_success", positive),
+                    ("physics_failure", negative),
+                )
             # Choose capture order before rendering so timestamps do not encode outcomes.
             for slot_idx, candidate_idx in enumerate(
                 rng.permutation(len(candidates)).tolist()
@@ -321,7 +345,9 @@ def _write_dataset(
                         o_prof,
                         expected_hand_pose=target_pose,
                     )
-                    if visibility.visible and oracle_ev.outcome == desired_outcome:
+                    if desired_outcome is None or (
+                        visibility.visible and oracle_ev.outcome == desired_outcome
+                    ):
                         break
                     rejected_candidates += 1
                 else:
@@ -364,6 +390,7 @@ def _write_dataset(
                         oracle=oracle_ev.to_dict(),
                         proposal={
                             "proposal_kind": proposal_kind,
+                            **({"expected_label": expected_label} if designed else {}),
                             "box_pos_m": box_pos.tolist(),
                             "box_yaw_rad": box_yaw,
                             "hand_offset_xyz_m": list(hand_offset),
@@ -397,7 +424,9 @@ def _write_dataset(
 
     dataset_meta = {
         "benchmark": "jev-grip-benchmark",
-        "milestone": "pilot" if pilot else "local-milestone-1",
+        "milestone": "designed-cases"
+        if designed
+        else ("pilot" if pilot else "local-milestone-1"),
         "evaluator_schema_version": EVALUATOR_SCHEMA_VERSION,
         "observation_schema_version": OBSERVATION_SCHEMA_VERSION,
         "generated_at_utc": datetime.now(UTC).isoformat(),

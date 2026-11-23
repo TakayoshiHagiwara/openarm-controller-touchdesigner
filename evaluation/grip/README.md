@@ -58,6 +58,17 @@ Recheck the existing snapshots and their labels:
 uv run --locked python -m evaluation.grip --out out/grip_smoke --verify-only
 ```
 
+Generate the static Pilot with 50 box placements, two frames per placement,
+and a seeded 20/80 development/evaluation split:
+
+```bash
+uv run --locked python -m evaluation.grip --pilot --seed 113 --groups 50 --out out/grip-pilot-113
+```
+
+`evaluator/splits.json` maps placement IDs to `dev` or `eval`. Both frames from
+a placement stay in that split. The Pilot favors small fore/aft and vertical
+offset pairs and confirms each outcome with the existing physics oracle.
+
 Run the focused regression suite:
 
 ```bash

@@ -5370,6 +5370,390 @@
           "elapsed_ms": 842.3632
         }
       ]
+    },
+    "head-rerun-terra-high-wrist": {
+      "dataset": "designed_head_views",
+      "split": "all",
+      "view_mode": "wrist",
+      "input_condition": "wrist",
+      "image_count": 1,
+      "output_mode": "json_schema",
+      "backend": "openai-terra-high",
+      "model": "gpt-6.1-terra",
+      "source_artifact": "out/grip-cases-v1-head-evaluation/terra-high-20261124/wrist",
+      "summary_sha256": "b0dac3ad7a44a33d948b90dbbb891c4a5d7ba06e87947fb4e3b68b719b2c292c",
+      "predictions_sha256": "a7464d7809338d7ae1df38d39528f86c49c69bbe47d42fb77e312efef5246141",
+      "settings": {
+        "generated_at_utc": "2026-11-24T04:52:00.521721+00:00",
+        "question": "Look at the robot's wrist-camera image. Can the open gripper pick up the orange box by closing its jaws at the current position and orientation, then lifting?",
+        "prompt": "Look at the robot's wrist-camera image. Can the open gripper pick up the orange box by closing its jaws at the current position and orientation, then lifting?\nclose: The box is positioned within reach between the jaws. Close now.\nwait: The box is outside the region the jaws can grip. Do not close yet.\nuncertain: The image does not give enough evidence about the box and jaws.\nReturn a JSON object with only the key \"choice\" and one of the values above.",
+        "choices": [
+          "close",
+          "wait",
+          "uncertain"
+        ],
+        "temperature": null,
+        "temperature_sent": false,
+        "max_completion_tokens": 8192,
+        "reasoning_effort": "high",
+        "timeout_s": 90.0,
+        "choice_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "choice": {
+              "enum": [
+                "close",
+                "wait",
+                "uncertain"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "choice"
+          ],
+          "type": "object"
+        },
+        "response_models": [
+          "gpt-6.1-terra"
+        ],
+        "request_config_sha256": "759b44b82399aedb57ec1463e3c925feee9a607bebaa4e045f516dc6b69e5ca8",
+        "observation_manifest_sha256": "20b609395641ae1b80151e1e1edb85c084fbe48031c92a40b20cae2d3693bb35",
+        "rejected_configuration_probes": [
+          {
+            "http_status": 400,
+            "temperature": 0
+          }
+        ]
+      },
+      "metrics": {
+        "n": 6,
+        "positive": 3,
+        "negative": 3,
+        "ok": 6,
+        "responses": {
+          "close": 5,
+          "wait": 1,
+          "uncertain": 0
+        },
+        "failures": {},
+        "correct_close": 3,
+        "false_close": 2,
+        "deadline_correct_close": {
+          "100ms": 0,
+          "200ms": 0,
+          "500ms": 0
+        },
+        "p50_ms": 5542.5121,
+        "p95_ms": 9623.132674999999,
+        "p95_method": "linear_interpolation"
+      },
+      "predictions": [
+        {
+          "sample_id": "smp_f8952217086f",
+          "group_id": "grp_0000",
+          "label": 1,
+          "status": "ok",
+          "decision": "close",
+          "elapsed_ms": 3391.0897
+        },
+        {
+          "sample_id": "smp_2eae5ff5ba7e",
+          "group_id": "grp_0000",
+          "label": 1,
+          "status": "ok",
+          "decision": "close",
+          "elapsed_ms": 2546.5502
+        },
+        {
+          "sample_id": "smp_27eac870d0b5",
+          "group_id": "grp_0000",
+          "label": 1,
+          "status": "ok",
+          "decision": "close",
+          "elapsed_ms": 10250.0832
+        },
+        {
+          "sample_id": "smp_7c09efd354ce",
+          "group_id": "grp_0000",
+          "label": 0,
+          "status": "ok",
+          "decision": "close",
+          "elapsed_ms": 5114.4793
+        },
+        {
+          "sample_id": "smp_0af66c5670f7",
+          "group_id": "grp_0000",
+          "label": 0,
+          "status": "ok",
+          "decision": "wait",
+          "elapsed_ms": 7742.2811
+        },
+        {
+          "sample_id": "smp_80b8642c48ad",
+          "group_id": "grp_0000",
+          "label": 0,
+          "status": "ok",
+          "decision": "close",
+          "elapsed_ms": 5970.5449
+        }
+      ]
+    },
+    "head-rerun-terra-high-head-wrist": {
+      "dataset": "designed_head_views",
+      "split": "all",
+      "view_mode": "main-wrist",
+      "input_condition": "head-wrist",
+      "image_count": 2,
+      "output_mode": "json_schema",
+      "backend": "openai-terra-high",
+      "model": "gpt-6.1-terra",
+      "source_artifact": "out/grip-cases-v1-head-evaluation/terra-high-20261124/main-wrist",
+      "summary_sha256": "08d0de4fd4b89257b4e8ade999befd66a227ac996c41856d84e90aa01ef0672f",
+      "predictions_sha256": "000283f771afdf208db502fd2773489926dec9337f7d6b81c5582fbef910f06b",
+      "settings": {
+        "generated_at_utc": "2026-11-24T04:53:35.738874+00:00",
+        "question": "The first image is from the fixed main camera. The second image is from the wrist camera at the same instant. Use both views. Can the open gripper pick up the orange box by closing its jaws at the current position and orientation, then lifting?",
+        "prompt": "The first image is from the fixed main camera. The second image is from the wrist camera at the same instant. Use both views. Can the open gripper pick up the orange box by closing its jaws at the current position and orientation, then lifting?\nclose: The box is positioned within reach between the jaws. Close now.\nwait: The box is outside the region the jaws can grip. Do not close yet.\nuncertain: The image does not give enough evidence about the box and jaws.\nReturn a JSON object with only the key \"choice\" and one of the values above.",
+        "choices": [
+          "close",
+          "wait",
+          "uncertain"
+        ],
+        "temperature": null,
+        "temperature_sent": false,
+        "max_completion_tokens": 8192,
+        "reasoning_effort": "high",
+        "timeout_s": 90.0,
+        "choice_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "choice": {
+              "enum": [
+                "close",
+                "wait",
+                "uncertain"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "choice"
+          ],
+          "type": "object"
+        },
+        "response_models": [
+          "gpt-6.1-terra"
+        ],
+        "request_config_sha256": "759b44b82399aedb57ec1463e3c925feee9a607bebaa4e045f516dc6b69e5ca8",
+        "observation_manifest_sha256": "20b609395641ae1b80151e1e1edb85c084fbe48031c92a40b20cae2d3693bb35",
+        "rejected_configuration_probes": [
+          {
+            "http_status": 400,
+            "temperature": 0
+          }
+        ]
+      },
+      "metrics": {
+        "n": 6,
+        "positive": 3,
+        "negative": 3,
+        "ok": 6,
+        "responses": {
+          "close": 6,
+          "wait": 0,
+          "uncertain": 0
+        },
+        "failures": {},
+        "correct_close": 3,
+        "false_close": 3,
+        "deadline_correct_close": {
+          "100ms": 0,
+          "200ms": 0,
+          "500ms": 0
+        },
+        "p50_ms": 6071.1746,
+        "p95_ms": 17262.423675,
+        "p95_method": "linear_interpolation"
+      },
+      "predictions": [
+        {
+          "sample_id": "smp_f8952217086f",
+          "group_id": "grp_0000",
+          "label": 1,
+          "status": "ok",
+          "decision": "close",
+          "elapsed_ms": 3480.8575
+        },
+        {
+          "sample_id": "smp_2eae5ff5ba7e",
+          "group_id": "grp_0000",
+          "label": 1,
+          "status": "ok",
+          "decision": "close",
+          "elapsed_ms": 1922.1218
+        },
+        {
+          "sample_id": "smp_27eac870d0b5",
+          "group_id": "grp_0000",
+          "label": 1,
+          "status": "ok",
+          "decision": "close",
+          "elapsed_ms": 10817.9652
+        },
+        {
+          "sample_id": "smp_7c09efd354ce",
+          "group_id": "grp_0000",
+          "label": 0,
+          "status": "ok",
+          "decision": "close",
+          "elapsed_ms": 6831.1318
+        },
+        {
+          "sample_id": "smp_0af66c5670f7",
+          "group_id": "grp_0000",
+          "label": 0,
+          "status": "ok",
+          "decision": "close",
+          "elapsed_ms": 19410.5765
+        },
+        {
+          "sample_id": "smp_80b8642c48ad",
+          "group_id": "grp_0000",
+          "label": 0,
+          "status": "ok",
+          "decision": "close",
+          "elapsed_ms": 5311.2174
+        }
+      ]
+    },
+    "head-rerun-terra-high-overlay": {
+      "dataset": "designed_head_views",
+      "split": "all",
+      "view_mode": "wrist-overlay",
+      "input_condition": "overlay",
+      "image_count": 1,
+      "output_mode": "json_schema",
+      "backend": "openai-terra-high",
+      "model": "gpt-6.1-terra",
+      "source_artifact": "out/grip-cases-v1-head-evaluation/terra-high-20261124/wrist-overlay",
+      "summary_sha256": "dffdafef740699d57c4e5e45d4e52393370a93fd7845ad525803cb20b5544db0",
+      "predictions_sha256": "1143b868b7baebd6ccc0fd97fc5ac4c9d5491495ef9632a36f0835825119889e",
+      "settings": {
+        "generated_at_utc": "2026-11-24T04:52:47.916943+00:00",
+        "question": "The wrist-camera image shows the current open gripper. The translucent cyan overlay shows the fingers fully closed in empty space at that same wrist pose. Use the overlay as a guide. Can the open gripper pick up the orange box by closing its jaws at the current position and orientation, then lifting?",
+        "prompt": "The wrist-camera image shows the current open gripper. The translucent cyan overlay shows the fingers fully closed in empty space at that same wrist pose. Use the overlay as a guide. Can the open gripper pick up the orange box by closing its jaws at the current position and orientation, then lifting?\nclose: The box is positioned within reach between the jaws. Close now.\nwait: The box is outside the region the jaws can grip. Do not close yet.\nuncertain: The image does not give enough evidence about the box and jaws.\nReturn a JSON object with only the key \"choice\" and one of the values above.",
+        "choices": [
+          "close",
+          "wait",
+          "uncertain"
+        ],
+        "temperature": null,
+        "temperature_sent": false,
+        "max_completion_tokens": 8192,
+        "reasoning_effort": "high",
+        "timeout_s": 90.0,
+        "choice_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "choice": {
+              "enum": [
+                "close",
+                "wait",
+                "uncertain"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "choice"
+          ],
+          "type": "object"
+        },
+        "response_models": [
+          "gpt-6.1-terra"
+        ],
+        "request_config_sha256": "759b44b82399aedb57ec1463e3c925feee9a607bebaa4e045f516dc6b69e5ca8",
+        "observation_manifest_sha256": "20b609395641ae1b80151e1e1edb85c084fbe48031c92a40b20cae2d3693bb35",
+        "rejected_configuration_probes": [
+          {
+            "http_status": 400,
+            "temperature": 0
+          }
+        ]
+      },
+      "metrics": {
+        "n": 6,
+        "positive": 3,
+        "negative": 3,
+        "ok": 6,
+        "responses": {
+          "close": 6,
+          "wait": 0,
+          "uncertain": 0
+        },
+        "failures": {},
+        "correct_close": 3,
+        "false_close": 3,
+        "deadline_correct_close": {
+          "100ms": 0,
+          "200ms": 0,
+          "500ms": 0
+        },
+        "p50_ms": 7095.978950000001,
+        "p95_ms": 11098.358275,
+        "p95_method": "linear_interpolation"
+      },
+      "predictions": [
+        {
+          "sample_id": "smp_f8952217086f",
+          "group_id": "grp_0000",
+          "label": 1,
+          "status": "ok",
+          "decision": "close",
+          "elapsed_ms": 5839.0992
+        },
+        {
+          "sample_id": "smp_2eae5ff5ba7e",
+          "group_id": "grp_0000",
+          "label": 1,
+          "status": "ok",
+          "decision": "close",
+          "elapsed_ms": 6744.6632
+        },
+        {
+          "sample_id": "smp_27eac870d0b5",
+          "group_id": "grp_0000",
+          "label": 1,
+          "status": "ok",
+          "decision": "close",
+          "elapsed_ms": 10921.6225
+        },
+        {
+          "sample_id": "smp_7c09efd354ce",
+          "group_id": "grp_0000",
+          "label": 0,
+          "status": "ok",
+          "decision": "close",
+          "elapsed_ms": 5237.86
+        },
+        {
+          "sample_id": "smp_0af66c5670f7",
+          "group_id": "grp_0000",
+          "label": 0,
+          "status": "ok",
+          "decision": "close",
+          "elapsed_ms": 7447.2947
+        },
+        {
+          "sample_id": "smp_80b8642c48ad",
+          "group_id": "grp_0000",
+          "label": 0,
+          "status": "ok",
+          "decision": "close",
+          "elapsed_ms": 11157.2702
+        }
+      ]
     }
   }
 }
